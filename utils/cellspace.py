@@ -1,13 +1,15 @@
 import sys
-sys.path.append('..')
+
+sys.path.append("..")
 import math
 
-__all__ = ['merc2cell', 'create_cellspace']
+__all__ = ["merc2cell", "create_cellspace"]
+
 
 def _xy2cellid(x, y, space):
-    i_x = int(x - space['x_min']) // space['x_unit']
-    i_y = int(y - space['y_min']) // space['y_unit']
-    return i_x * space['y_size'] + i_y
+    i_x = int(x - space["x_min"]) // space["x_unit"]
+    i_y = int(y - space["y_min"]) // space["y_unit"]
+    return i_x * space["y_size"] + i_y
 
 
 def merc2cell(src, space):
@@ -27,15 +29,15 @@ def create_cellspace(x_min, x_max, y_min, y_max, x_unit, y_unit, buffer):
     size = x_size * y_size
 
     dic = {
-        'x_min': x_min,
-        'x_max': x_max,
-        'y_min': y_min,
-        'y_max': y_max,
-        'x_unit': x_unit,
-        'y_unit': y_unit,
-        'buffer': buffer,
-        'x_size': x_size,
-        'y_size': y_size,
-        'size': size,
+        "x_min": x_min,
+        "x_max": x_max,
+        "y_min": y_min,
+        "y_max": y_max,
+        "x_unit": x_unit,
+        "y_unit": y_unit,
+        "buffer": buffer,
+        "x_size": x_size,
+        "y_size": y_size,
+        "size": size,
     }
     return dic

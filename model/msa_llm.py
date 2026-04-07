@@ -6,14 +6,16 @@
 import math
 from dataclasses import dataclass
 from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+
 @dataclass
 class ModelArgs:
-    dim: int = 4096 
+    dim: int = 4096
     n_layers: int = 32
     n_heads: int = 32
     hidden_dim: int = 11008
@@ -24,7 +26,9 @@ class ModelArgs:
     dropout: float = 0.1
 
 
-def precompute_freqs_cis(head_dim: int, seq_len: int, device: str, base: float = 10000.0):
+def precompute_freqs_cis(
+    head_dim: int, seq_len: int, device: str, base: float = 10000.0
+):
     assert head_dim % 2 == 0, "dimension must be divisible by 2"
     # Shape: (head_dim / 2)
     theta_numerator = torch.arange(0, head_dim, 2).float()
@@ -45,7 +49,7 @@ def apply_rotary_embeddings(x: Tensor, freqs_complex: Tensor, device: str):
     x_complex = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
     # Shape: (seq_len, head_dim/2) -> (1, seq_len, 1, head_dim/2)
     freqs_complex = freqs_complex.unsqueeze(0).unsqueeze(2)
-    # Shape: (batch_size, seq_len, n_head, head_dim/2) * (1, seq_len, 1, head_dim/2) 
+    # Shape: (batch_size, seq_len, n_head, head_dim/2) * (1, seq_len, 1, head_dim/2)
     # = (batch_size, seq_len, n_head, head_dim/2)
     x_rotated = x_complex * freqs_complex
     # Shape: (batch_size, seq_len, n_head, head_dim/2) -> (batch_size, seq_len, n_head, head_dim/2, 2)
@@ -76,7 +80,7 @@ class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
         self.args = args
-        self.n_heads = args.n_heads 
+        self.n_heads = args.n_heads
         self.head_dim = args.dim // args.n_heads  # dim of every head
 
         self.wq = nn.Linear(args.dim, args.n_heads * self.head_dim, bias=False)
@@ -114,7 +118,9 @@ class Attention(nn.Module):
         scores = torch.matmul(xq, xk.transpose(2, 3)) / math.sqrt(self.head_dim)
         if mask is not None:
             if mask.dim() == 2:
-                mask = mask.view(batch_size, 1, 1, seq_len).expand(-1, self.n_heads, -1, -1)
+                mask = mask.view(batch_size, 1, 1, seq_len).expand(
+                    -1, self.n_heads, -1, -1
+                )
             scores = scores + mask  # (batch_size, n_head_q, seq_len, seq_len_kv)
         # -> (batch_size, n_head_q, seq_len, seq_len_kv)
         scores = self.dropout(F.softmax(scores.float(), dim=-1).type_as(xq))
@@ -124,7 +130,7 @@ class Attention(nn.Module):
         output = torch.matmul(scores, xv)
         # (batch_size, n_head_q, seq_len, head_dim) -> (batch_size, seq_len, n_head_q, head_dim)
         # -> (batch_size, seq_len, dim)
-        output = (output.transpose(1, 2).contiguous().view(batch_size, seq_len, -1))
+        output = output.transpose(1, 2).contiguous().view(batch_size, seq_len, -1)
         # (batch_size, seq_len, dim) -> (batch_size, seq_len, dim)
         return self.wo(output)
 
@@ -177,9 +183,11 @@ class LlamaModel(nn.Module):
         for _ in range(args.n_layers):
             self.layers.append(DecoderBlock(args))
 
-        self.freqs_complex = precompute_freqs_cis(self.args.dim // self.args.n_heads,
-                                                  self.args.max_seq_len * 2,
-                                                  self.args.device)
+        self.freqs_complex = precompute_freqs_cis(
+            self.args.dim // self.args.n_heads,
+            self.args.max_seq_len * 2,
+            self.args.device,
+        )
 
     def forward(self, src, attn_mask, src_padding_mask, src_len):
         # src: [seq_len, batch_size, emb_size]
@@ -187,19 +195,24 @@ class LlamaModel(nn.Module):
         # src_padding_mask: [batch_size, seq_len]
         # src_len: [batch_size]
 
-        seqlen, _, _  = src.shape
-        
-        freqs_complex = self.freqs_complex[0: seqlen]
-        
-        mask = torch.zeros_like(src_padding_mask, dtype = src_padding_mask.dtype, device = src_padding_mask.device) \
-                    .masked_fill_(src_padding_mask, float('-inf'))
+        seqlen, _, _ = src.shape
 
-        h = src.transpose(0, 1) # -> batch_size, seq_len, emb_dim
+        freqs_complex = self.freqs_complex[0:seqlen]
+
+        mask = torch.zeros_like(
+            src_padding_mask,
+            dtype=src_padding_mask.dtype,
+            device=src_padding_mask.device,
+        ).masked_fill_(src_padding_mask, float("-inf"))
+
+        h = src.transpose(0, 1)  # -> batch_size, seq_len, emb_dim
         for layer in self.layers:
             h = layer(h, freqs_complex, mask)
-        
-        mask = 1 - src_padding_mask.unsqueeze(-1).expand(h.shape).float() # [batch_size, seq_len, emb_dim]
-        rtn = torch.sum(mask * h, 1) # [batch_size, emb_dim]
+
+        mask = (
+            1 - src_padding_mask.unsqueeze(-1).expand(h.shape).float()
+        )  # [batch_size, seq_len, emb_dim]
+        rtn = torch.sum(mask * h, 1)  # [batch_size, emb_dim]
         rtn = rtn / src_len.unsqueeze(-1).expand(rtn.shape)
 
         return rtn
