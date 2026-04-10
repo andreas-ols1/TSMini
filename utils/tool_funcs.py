@@ -10,7 +10,8 @@ try:
 
     nvmlInit()  # need initializztion here
     _nvml_available = True
-except Exception:
+except Exception as e:
+    print(f"[GPUInfo] pynvml unavailable: {e}")
     _nvml_available = False
 from datetime import datetime, timedelta, timezone
 
@@ -145,17 +146,43 @@ timer = Timer()
 
 
 class GPUInfo:
-    _h = nvmlDeviceGetHandleByIndex(0) if _nvml_available else None
+    _h = None
+
+    @classmethod
+    def _get_handle(cls):
+        if cls._h is None and _nvml_available:
+            try:
+                cls._h = nvmlDeviceGetHandleByIndex(0)
+            except Exception as e:
+                print("Exception in tool_funcs GPUInfo _get_handle")
+                print(e)
+                pass
+        return cls._h
 
     @classmethod
     def mem(cls):
-        if not _nvml_available or cls._h is None:
-            return 0, 0  # no GPU available
-        info = nvmlDeviceGetMemoryInfo(cls._h)
+        h = cls._get_handle()
+        if not _nvml_available or h is None:
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    used = torch.cuda.memory_allocated() // 1048576
+                    total = (
+                        torch.cuda.get_device_properties(0).total_memory
+                        // 1048576
+                    )
+                    return used, total
+            except Exception:
+                pass
+            return 0, 0
+        info = nvmlDeviceGetMemoryInfo(h)
         return info.used // 1048576, info.total // 1048576  # in MB
 
 
 class RAMInfo:
     @classmethod
     def mem(cls):
-        return int(psutil.Process(os.getpid()).memory_info().rss / 1048576)  # in MB
+        return int(
+            psutil.Process(os.getpid()).memory_info().rss / 1048576
+        )  # in MB
