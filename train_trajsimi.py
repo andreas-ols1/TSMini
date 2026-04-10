@@ -2,10 +2,6 @@ import argparse
 import logging
 import os
 import sys
-import warnings
-
-# Suppress pynvml deprecation warning triggered by torch.cuda
-warnings.filterwarnings("ignore", message=".*pynvml.*", category=FutureWarning)
 
 import torch
 
