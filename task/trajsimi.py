@@ -26,48 +26,64 @@ from ..utils.traj import padding_traj, preprocess_traj
 
 _worker_trajs = None
 _worker_metric = None
+_worker_n = None
 
 
 def _init_worker(trajs, metric):
-    global _worker_trajs, _worker_metric
+    global _worker_trajs, _worker_metric, _worker_n
+    # Keep trajs as lightweight as possible to avoid memory duplication
     _worker_trajs = [np.asarray(t, dtype=np.float64) for t in trajs]
     _worker_metric = metric
+    _worker_n = len(trajs)
 
 
-def _compute_pair(ij):
-    i, j = ij
-    return calculate_distance(
-        _worker_metric,
-        _worker_trajs[i],
-        _worker_trajs[j],
-        dist_type="euclidean",
-    )
+def _compute_row(i):
+    """
+    Computes all distances from trajectory i to trajectories i+1 through n.
+    Returns the row index and a 1D numpy array of the results.
+    """
+    # Calculate how many comparisons this row needs
+    n_comparisons = _worker_n - i - 1
+
+    # Pre-allocate a numpy array for the results to save memory
+    row_dists = np.zeros(n_comparisons, dtype=np.float32)
+
+    # Calculate distances for the row
+    for idx, j in enumerate(range(i + 1, _worker_n)):
+        row_dists[idx] = calculate_distance(
+            _worker_metric,
+            _worker_trajs[i],
+            _worker_trajs[j],
+            dist_type="euclidean",
+        )
+
+    return i, row_dists
 
 
 def _pairwise_distance_matrix(trajs, metric, n_jobs=None):
     n = len(trajs)
     simi = np.zeros((n, n), dtype=np.float32)
-    pairs = [(i, j) for i in range(n) for j in range(i + 1, n)]
-    n_pairs = len(pairs)
+
     n_workers = n_jobs or multiprocessing.cpu_count()
-    chunksize = max(1, n_pairs // (n_workers * 4))
+
+    # We only iterate over the rows now. No massive pairs list.
+    rows_to_process = range(n - 1)
 
     with multiprocessing.Pool(
-        processes=n_jobs,
+        processes=n_workers,
         initializer=_init_worker,
         initargs=(trajs, metric),
     ) as pool:
-        results = list(
-            tqdm(
-                pool.imap(_compute_pair, pairs, chunksize=chunksize),
-                total=n_pairs,
-                desc="Computing pairwise distances",
-            )
-        )
 
-    for (i, j), d in zip(pairs, results):
-        simi[i, j] = d
-        simi[j, i] = d
+        # imap_unordered is faster because it yields results as soon as they finish,
+        # rather than forcing them to return in sequential order.
+        iterator = pool.imap_unordered(_compute_row, rows_to_process)
+
+        for i, row_dists in tqdm(iterator, total=n - 1, desc="Computing rows"):
+            # row_dists contains distances from i to (i+1 ... n)
+            # We can efficiently assign this slice directly into the pre-allocated matrix
+            simi[i, i + 1 :] = row_dists
+            simi[i + 1 :, i] = row_dists  # Mirror for symmetry
 
     return simi
 
@@ -110,7 +126,9 @@ class TrajSimi:
 
         # create dataloader
         len_dataset_trains = len(self.dic_datasets["trains_traj"])
-        training_batch_size = min(len_dataset_trains, Config.trajsimi_batch_size)
+        training_batch_size = min(
+            len_dataset_trains, Config.trajsimi_batch_size
+        )
         train_dataset = TrajSimiDatasetTraining(
             self.dic_datasets["trains_traj"], training_batch_size
         )
@@ -148,7 +166,9 @@ class TrajSimi:
 
     def train(self):
         training_starttime = time.time()
-        logging.info("train_trajsimi start.@={:.3f}".format(training_starttime))
+        logging.info(
+            "train_trajsimi start.@={:.3f}".format(training_starttime)
+        )
 
         self.criterion = nn.MSELoss().to(Config.device)
 
@@ -187,7 +207,9 @@ class TrajSimi:
                 trajs, trajs_len, sampled_idxs = batch
                 trajs = trajs.to(Config.device)
                 trajs_len = trajs_len.to(Config.device)
-                sub_simi = self.dataset_simi_trains[sampled_idxs][:, sampled_idxs]
+                sub_simi = self.dataset_simi_trains[sampled_idxs][
+                    :, sampled_idxs
+                ]
 
                 embs = self.encoder(trajs, trajs_len)
 
@@ -203,31 +225,39 @@ class TrajSimi:
                     truth_l1_simi.mean() / pred_l1_simi.mean()
                 )
                 loss_wmse = torch.mean(
-                    torch.pow(pred_l1_simi - truth_l1_simi, 2) * (1 - truth_l1_simi)
+                    torch.pow(pred_l1_simi - truth_l1_simi, 2)
+                    * (1 - truth_l1_simi)
                 )
 
                 n = pred_rank.shape[0]
                 pred_rank_max = pred_rank.max(dim=-1)[0].unsqueeze(1)
                 pred_rank = (
-                    pred_rank.flatten()[1:].view(n - 1, n + 1)[:, :-1].reshape(n, n - 1)
+                    pred_rank.flatten()[1:]
+                    .view(n - 1, n + 1)[:, :-1]
+                    .reshape(n, n - 1)
                 )
                 pred_rank = pred_rank_max - pred_rank
 
                 sub_simi_max = sub_simi.max(dim=-1)[0].unsqueeze(1)
                 sub_simi = (
-                    sub_simi.flatten()[1:].view(n - 1, n + 1)[:, :-1].reshape(n, n - 1)
+                    sub_simi.flatten()[1:]
+                    .view(n - 1, n + 1)[:, :-1]
+                    .reshape(n, n - 1)
                 )
                 sub_simi = sub_simi_max - sub_simi
                 loss_rank = lambdaLoss(pred_rank, sub_simi, k=10)
 
-                loss = loss_wmse * Config.trajsimi_loss_mse_weight * 100 + loss_rank * (
-                    1 - Config.trajsimi_loss_mse_weight
+                loss = (
+                    loss_wmse * Config.trajsimi_loss_mse_weight * 100
+                    + loss_rank * (1 - Config.trajsimi_loss_mse_weight)
                 )
 
                 loss.backward()
                 optimizer.step()
 
-                train_losses.append([loss.item(), loss_wmse.item(), loss_rank.item()])
+                train_losses.append(
+                    [loss.item(), loss_wmse.item(), loss_rank.item()]
+                )
                 train_gpus.append(tool_funcs.GPUInfo.mem()[0])
                 train_rams.append(tool_funcs.RAMInfo.mem())
 
@@ -275,7 +305,10 @@ class TrajSimi:
             else:
                 bad_counter += 1
 
-            if bad_counter == bad_patience or i_ep + 1 == Config.trajsimi_epoch:
+            if (
+                bad_counter == bad_patience
+                or i_ep + 1 == Config.trajsimi_epoch
+            ):
                 training_endtime = time.time()
                 logging.info(
                     "training end. @={:.3f}, best_epoch={}, best_hr_eval={:.4f}".format(
@@ -401,7 +434,9 @@ class TrajSimi:
         )
 
         _, preds_k_idx = torch.topk(preds, pred_topk + 1, dim=1, largest=False)
-        _, truths_k_idx = torch.topk(truths, truth_topk + 1, dim=1, largest=False)
+        _, truths_k_idx = torch.topk(
+            truths, truth_topk + 1, dim=1, largest=False
+        )
 
         preds_k_idx = preds_k_idx.cpu()
         truths_k_idx = truths_k_idx.cpu()
@@ -431,11 +466,13 @@ class TrajSimi:
                 Config.seed,
             )
         )
-        trains_simi, evals_simi, tests_simi, max_distance = _build_simi_dataset(
-            trains_traj,
-            evals_traj,
-            tests_traj,
-            Config.simi_metric,
+        trains_simi, evals_simi, tests_simi, max_distance = (
+            _build_simi_dataset(
+                trains_traj,
+                evals_traj,
+                tests_traj,
+                Config.simi_metric,
+            )
         )
 
         # trains_traj : [[[lon, lat_in_merc], [], ..], [], ...]
@@ -455,7 +492,9 @@ class TrajSimi:
 def collate_training(batch, space, duplicate_short_tolerance):
     trajs, sampled_idxs = batch[0]
 
-    trajs = [preprocess_traj(t, space, duplicate_short_tolerance) for t in trajs]
+    trajs = [
+        preprocess_traj(t, space, duplicate_short_tolerance) for t in trajs
+    ]
     trajs, trajs_len = padding_traj(trajs)
 
     trajs = torch.tensor(trajs, dtype=torch.float)  # cpu
@@ -465,7 +504,9 @@ def collate_training(batch, space, duplicate_short_tolerance):
 
 
 def collate_eval_test(trajs_src, space, duplicate_short_tolerance):
-    trajs = [preprocess_traj(t, space, duplicate_short_tolerance) for t in trajs_src]
+    trajs = [
+        preprocess_traj(t, space, duplicate_short_tolerance) for t in trajs_src
+    ]
     trajs, trajs_len = padding_traj(trajs)
 
     trajs = torch.tensor(trajs, dtype=torch.float)  # cpu
