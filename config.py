@@ -33,7 +33,7 @@ class Config:
     max_trajs = 1200
     train_ratio = 0.7
     eval_ratio = 0.1
-    simi_metric = "dtw"  # dtw
+    simi_metric = "dtw"  # dtw, frechet, hausdorff, edr, lcss, erp, sspd
 
     # ===========general=============
     min_traj_len = 20

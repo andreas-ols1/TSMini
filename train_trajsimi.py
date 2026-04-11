@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument(
         "--simi_metric",
         type=str,
-        choices=["dtw"],
+        choices=["dtw", "frechet", "hausdorff", "edr", "lcss", "erp", "sspd"],
         help="",
     )
     parser.add_argument("--tsmin_trans_attention_layer", type=int, help="")
