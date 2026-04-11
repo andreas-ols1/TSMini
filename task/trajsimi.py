@@ -2,6 +2,7 @@ import copy
 import logging
 import multiprocessing
 import os
+import random
 import time
 from functools import partial
 
@@ -27,6 +28,13 @@ from ..utils.traj import padding_traj, preprocess_traj
 _worker_trajs = None
 _worker_metric = None
 _worker_n = None
+
+
+def _seed_worker(worker_id):
+    seed = Config.seed + worker_id
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
 
 def _init_worker(trajs, metric):
@@ -133,6 +141,9 @@ class TrajSimi:
             self.dic_datasets["trains_traj"], training_batch_size
         )
 
+        _generator = torch.Generator()
+        _generator.manual_seed(Config.seed)
+
         self.train_dataloader = DataLoader(
             train_dataset,
             batch_size=1,
@@ -143,6 +154,8 @@ class TrajSimi:
                 space=copy.deepcopy(self.space),
                 duplicate_short_tolerance=0,
             ),
+            worker_init_fn=_seed_worker,
+            generator=_generator,
         )
 
         # ground-truth simi for training dataset
