@@ -168,10 +168,7 @@ class GPUInfo:
 
                 if torch.cuda.is_available():
                     used = torch.cuda.memory_allocated() // 1048576
-                    total = (
-                        torch.cuda.get_device_properties(0).total_memory
-                        // 1048576
-                    )
+                    total = torch.cuda.get_device_properties(0).total_memory // 1048576
                     return used, total
             except Exception:
                 pass
@@ -183,6 +180,4 @@ class GPUInfo:
 class RAMInfo:
     @classmethod
     def mem(cls):
-        return int(
-            psutil.Process(os.getpid()).memory_info().rss / 1048576
-        )  # in MB
+        return int(psutil.Process(os.getpid()).memory_info().rss / 1048576)  # in MB
