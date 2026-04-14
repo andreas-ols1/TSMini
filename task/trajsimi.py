@@ -82,7 +82,6 @@ def _pairwise_distance_matrix(trajs, metric, n_jobs=None):
         initializer=_init_worker,
         initargs=(trajs, metric),
     ) as pool:
-
         # imap_unordered is faster because it yields results as soon as they finish,
         # rather than forcing them to return in sequential order.
         iterator = pool.imap_unordered(_compute_row, rows_to_process)
@@ -134,9 +133,7 @@ class TrajSimi:
 
         # create dataloader
         len_dataset_trains = len(self.dic_datasets["trains_traj"])
-        training_batch_size = min(
-            len_dataset_trains, Config.trajsimi_batch_size
-        )
+        training_batch_size = min(len_dataset_trains, Config.trajsimi_batch_size)
         train_dataset = TrajSimiDatasetTraining(
             self.dic_datasets["trains_traj"], training_batch_size
         )
@@ -179,9 +176,7 @@ class TrajSimi:
 
     def train(self):
         training_starttime = time.time()
-        logging.info(
-            "train_trajsimi start.@={:.3f}".format(training_starttime)
-        )
+        logging.info("train_trajsimi start.@={:.3f}".format(training_starttime))
 
         self.criterion = nn.MSELoss().to(Config.device)
 
@@ -220,9 +215,7 @@ class TrajSimi:
                 trajs, trajs_len, sampled_idxs = batch
                 trajs = trajs.to(Config.device)
                 trajs_len = trajs_len.to(Config.device)
-                sub_simi = self.dataset_simi_trains[sampled_idxs][
-                    :, sampled_idxs
-                ]
+                sub_simi = self.dataset_simi_trains[sampled_idxs][:, sampled_idxs]
 
                 embs = self.encoder(trajs, trajs_len)
 
@@ -238,39 +231,31 @@ class TrajSimi:
                     truth_l1_simi.mean() / pred_l1_simi.mean()
                 )
                 loss_wmse = torch.mean(
-                    torch.pow(pred_l1_simi - truth_l1_simi, 2)
-                    * (1 - truth_l1_simi)
+                    torch.pow(pred_l1_simi - truth_l1_simi, 2) * (1 - truth_l1_simi)
                 )
 
                 n = pred_rank.shape[0]
                 pred_rank_max = pred_rank.max(dim=-1)[0].unsqueeze(1)
                 pred_rank = (
-                    pred_rank.flatten()[1:]
-                    .view(n - 1, n + 1)[:, :-1]
-                    .reshape(n, n - 1)
+                    pred_rank.flatten()[1:].view(n - 1, n + 1)[:, :-1].reshape(n, n - 1)
                 )
                 pred_rank = pred_rank_max - pred_rank
 
                 sub_simi_max = sub_simi.max(dim=-1)[0].unsqueeze(1)
                 sub_simi = (
-                    sub_simi.flatten()[1:]
-                    .view(n - 1, n + 1)[:, :-1]
-                    .reshape(n, n - 1)
+                    sub_simi.flatten()[1:].view(n - 1, n + 1)[:, :-1].reshape(n, n - 1)
                 )
                 sub_simi = sub_simi_max - sub_simi
                 loss_rank = lambdaLoss(pred_rank, sub_simi, k=10)
 
-                loss = (
-                    loss_wmse * Config.trajsimi_loss_mse_weight * 100
-                    + loss_rank * (1 - Config.trajsimi_loss_mse_weight)
+                loss = loss_wmse * Config.trajsimi_loss_mse_weight * 100 + loss_rank * (
+                    1 - Config.trajsimi_loss_mse_weight
                 )
 
                 loss.backward()
                 optimizer.step()
 
-                train_losses.append(
-                    [loss.item(), loss_wmse.item(), loss_rank.item()]
-                )
+                train_losses.append([loss.item(), loss_wmse.item(), loss_rank.item()])
                 train_gpus.append(tool_funcs.GPUInfo.mem()[0])
                 train_rams.append(tool_funcs.RAMInfo.mem())
 
@@ -318,10 +303,7 @@ class TrajSimi:
             else:
                 bad_counter += 1
 
-            if (
-                bad_counter == bad_patience
-                or i_ep + 1 == Config.trajsimi_epoch
-            ):
+            if bad_counter == bad_patience or i_ep + 1 == Config.trajsimi_epoch:
                 training_endtime = time.time()
                 logging.info(
                     "training end. @={:.3f}, best_epoch={}, best_hr_eval={:.4f}".format(
@@ -447,9 +429,7 @@ class TrajSimi:
         )
 
         _, preds_k_idx = torch.topk(preds, pred_topk + 1, dim=1, largest=False)
-        _, truths_k_idx = torch.topk(
-            truths, truth_topk + 1, dim=1, largest=False
-        )
+        _, truths_k_idx = torch.topk(truths, truth_topk + 1, dim=1, largest=False)
 
         preds_k_idx = preds_k_idx.cpu()
         truths_k_idx = truths_k_idx.cpu()
@@ -479,13 +459,11 @@ class TrajSimi:
                 Config.seed,
             )
         )
-        trains_simi, evals_simi, tests_simi, max_distance = (
-            _build_simi_dataset(
-                trains_traj,
-                evals_traj,
-                tests_traj,
-                Config.simi_metric,
-            )
+        trains_simi, evals_simi, tests_simi, max_distance = _build_simi_dataset(
+            trains_traj,
+            evals_traj,
+            tests_traj,
+            Config.simi_metric,
         )
 
         # trains_traj : [[[lon, lat_in_merc], [], ..], [], ...]
@@ -505,9 +483,7 @@ class TrajSimi:
 def collate_training(batch, space, duplicate_short_tolerance):
     trajs, sampled_idxs = batch[0]
 
-    trajs = [
-        preprocess_traj(t, space, duplicate_short_tolerance) for t in trajs
-    ]
+    trajs = [preprocess_traj(t, space, duplicate_short_tolerance) for t in trajs]
     trajs, trajs_len = padding_traj(trajs)
 
     trajs = torch.tensor(trajs, dtype=torch.float)  # cpu
@@ -517,9 +493,7 @@ def collate_training(batch, space, duplicate_short_tolerance):
 
 
 def collate_eval_test(trajs_src, space, duplicate_short_tolerance):
-    trajs = [
-        preprocess_traj(t, space, duplicate_short_tolerance) for t in trajs_src
-    ]
+    trajs = [preprocess_traj(t, space, duplicate_short_tolerance) for t in trajs_src]
     trajs, trajs_len = padding_traj(trajs)
 
     trajs = torch.tensor(trajs, dtype=torch.float)  # cpu
