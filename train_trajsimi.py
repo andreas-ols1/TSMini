@@ -2,12 +2,16 @@ import argparse
 import logging
 import os
 import sys
+from pathlib import Path
 
 import torch
 
-from .config import Config
-from .task.trajsimi import TrajSimi
-from .utils import tool_funcs
+_SRC_DIR = str(Path(__file__).parent.parent)
+sys.path.insert(0, _SRC_DIR)
+
+from TSMini.config import Config
+from TSMini.task.trajsimi import TrajSimi
+from TSMini.utils import tool_funcs
 
 
 def parse_args():
