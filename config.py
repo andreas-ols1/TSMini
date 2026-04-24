@@ -27,6 +27,8 @@ class Config:
     checkpoint_dir = os.path.join(project_root, "models", "tsmini")
     log_dir = os.path.join(project_root, "logs", "tsmini")
 
+    n_workers = None  # None → multiprocessing.cpu_count() at runtime
+
     dataset = "porto"
     data_path = ""
     trip_id_col = "TRIP_ID"

@@ -464,6 +464,7 @@ class TrajSimi:
             evals_traj,
             tests_traj,
             Config.simi_metric,
+            n_jobs=Config.n_workers,
         )
 
         # trains_traj : [[[lon, lat_in_merc], [], ..], [], ...]

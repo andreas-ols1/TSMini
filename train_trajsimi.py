@@ -44,6 +44,12 @@ def parse_args():
     parser.add_argument(
         "--checkpoint_dir", type=str, help="directory for .pt checkpoints"
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        dest="n_workers",
+        help="Number of parallel workers for similarity matrix computation.",
+    )
 
     args = parser.parse_args()
     return dict(filter(lambda kv: kv[1] is not None, vars(args).items()))
