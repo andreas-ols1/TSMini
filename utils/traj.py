@@ -5,12 +5,14 @@ from . import tool_funcs
 def remove_duplicate_points(src, min_length_tolerance=0):
     if len(src) < min_length_tolerance:
         return src
-    tgt = [v for i, v in enumerate(src) if i == 0 or v[0] != src[i - 1][0]]
+    tgt = [v for i, v in enumerate(src) if i == 0 or v[0] != src[i - 1][0] or v[1] != src[i - 1][1]]
     return tgt
 
 
 def enrich_spatial_features(src, space):
     # src = [length, 2]
+    if len(src) < 2:
+        raise ValueError(f"Trajectory must have at least 2 points, got {len(src)}")
     tgt = []
     lens = []
     degs = []
